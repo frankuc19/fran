@@ -2,163 +2,441 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import timedelta
-import h3
+import traceback # Para mostrar errores detallados
 
-# ⬇️ Constantes por defecto
+# --- Configuración de Página (DEBE SER LO PRIMERO de Streamlit) ---
+st.set_page_config(
+    layout="wide",
+    page_title="Asignador de Móviles",
+    page_icon="🚀"
+)
+
+# --- Constantes ---
 RADIO_TIERRA_KM = 6371
-PRECISION_H3 = 3
+PRECISION_SIMULATE_H3 = 3
 
-# ⬇️ Parámetros configurables a través de la interfaz de Streamlit
+# Intervalos (en minutos) - AJUSTA ESTOS VALORES SI TU LÓGICA DE NEGOCIO ES DIFERENTE
+INTERVALO_CAMBIO_INTERREGIONAL = 270
+INTERVALO_URBANO_NOCTURNO = 70
+INTERVALO_URBANO_DIURNO = 80
+INTERVALO_GENERAL = 80
+INTERVALO_MIN_DEFAULT_FACTOR = 1.5
+
+# Límites de categoría - AJUSTA ESTOS VALORES SI TU LÓGICA DE NEGOCIO ES DIFERENTE
+MAX_INTERREGIONALES_POR_MOVIL = 2
+MAX_OTRAS_DIVISIONES_POR_MOVIL = 2
+
+# --- Columnas Esperadas en los Archivos CSV ---
+# !!! ### AJUSTAR AQUÍ SI ES NECESARIO ### !!!
+# Modifica estas listas si los nombres de las columnas en TUS archivos CSV son diferentes.
+REQUIRED_HIST_COLS = [
+    'latrecogida',         # Asegúrate que este nombre coincida con tu CSV Histórico
+    'lonrecogida',         # REEMPLAZA si tu CSV Histórico usa otro nombre para longitud recogida
+    'latdestino',          # REEMPLAZA si tu CSV Histórico usa otro nombre para latitud destino
+    'londestino',          # REEMPLAZA si tu CSV Histórico usa otro nombre para longitud destino
+    'tiempoestimada'       # REEMPLAZA si tu CSV Histórico usa otro nombre para tiempo histórico (minutos)
+]
+REQUIRED_PRED_COLS_ORIGINAL = [
+    'pickup_datetime',
+    'job_id',
+    'estimated_payment',
+    'Categoria_viaje',
+    'latrecogida',
+    'lonrecogida',
+    'latdestino',
+    'londestino'
+]
+RENAME_MAP_PRED = {
+    'pickup_datetime': 'HoraFecha',
+    'job_id': 'reserva',
+}
+REQUIRED_PRED_COLS_RENAMED = list(RENAME_MAP_PRED.values()) + [
+    'estimated_payment', 'Categoria_viaje', 'latrecogida', 'lonrecogida', 'latdestino', 'londestino'
+]
+
+
+# --- Parámetros Configurables ---
 st.sidebar.header("Parámetros de Asignación")
-MAX_MOVILES = st.sidebar.slider('Máximo de Móviles:', 1, 500, 100)
-MAX_MONTO_POR_MOVIL = st.sidebar.slider('Monto Máximo por Móvil:', 100000, 1000000, 500000, step=50000)
-MAX_RESERVAS_POR_MOVIL = st.sidebar.slider('Máximo de Reservas por Móvil:', 1, 10, 3)
-MAX_HORAS_POR_MOVIL = st.sidebar.slider('Máximo de Horas por Móvil:', 1, 24, 10)
+max_moviles_param = st.sidebar.slider('Máximo de Móviles:', 1, 500, 100, key="max_moviles")
+max_monto_param = st.sidebar.slider('Monto Máximo por Móvil ($):', 100000, 1000000, 500000, step=50000, key="max_monto")
+max_reservas_param = st.sidebar.slider('Máximo de Reservas por Móvil:', 1, 10, 3, key="max_reservas")
+max_horas_param = st.sidebar.slider('Máximo de Horas por Móvil:', 1, 24, 10, key="max_horas")
 
-# ⬇️ Funciones principales (sin cambios significativos)
-def haversine(lat1, lon1, lat2, lon2):
-    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
-    dlat, dlon = lat2 - lat1, lon2 - lon1
-    a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
-    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1-a))
-    return RADIO_TIERRA_KM * c
 
-def simulate_h3(lat, lon, precision=PRECISION_H3):
-    return f"{round(lat, precision)}_{round(lon, precision)}"
+# --- Funciones Auxiliares ---
+# (Las funciones check_columns, haversine_vectorized, simulate_h3_vectorized,
+# calcular_intervalo, monto_total_movil, puede_agregarse_a_movil
+# permanecen exactamente iguales que en la versión anterior)
+def check_columns(df, required_columns, filename):
+    """Verifica si un DataFrame contiene las columnas requeridas."""
+    missing_cols = [col for col in required_columns if col not in df.columns]
+    if missing_cols:
+        st.error(f"Error Crítico: Faltan las siguientes columnas obligatorias en el archivo '{filename}': {', '.join(missing_cols)}. Por favor, verifica el archivo CSV o ajusta las listas `REQUIRED_..._COLS` en el script.")
+        st.stop()
 
-def calcular_intervalo(ultima, nueva):
-    if nueva["Categoria_viaje"] != ultima["Categoria_viaje"] or nueva["Categoria_viaje"] in ["Interregional", "Divisiones"]:
-        return "Cambio/Interregional", 270
-    if nueva["Categoria_viaje"] == "Urbano":
-        return ("Urbano nocturno", 70) if 0 <= nueva["HoraFecha"].hour < 6 else ("Urbano diurno", 80)
-    return "General", 80
+def haversine_vectorized(lat1, lon1, lat2, lon2):
+    """Calcula la distancia Haversine de forma vectorizada."""
+    lon1, lat1, lon2, lat2 = map(np.radians, [lon1, lat1, lon2, lat2])
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = np.sin(dlat/2.0)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2.0)**2
+    c = 2 * np.arcsin(np.sqrt(a))
+    km = RADIO_TIERRA_KM * c
+    return km
 
-def monto_total_movil(movil):
-    return sum(r["estimated_payment"] for r in movil)
+def simulate_h3_vectorized(lats, lons, precision=PRECISION_SIMULATE_H3):
+    """Genera un ID símil-H3 basado en redondeo (vectorizado)."""
+    lats = pd.to_numeric(lats, errors='coerce')
+    lons = pd.to_numeric(lons, errors='coerce')
+    return lats.round(precision).astype(str) + "_" + lons.round(precision).astype(str)
 
-def puede_agregarse_a_movil(movil, nueva):
-    if len(movil) >= MAX_RESERVAS_POR_MOVIL:
+def calcular_intervalo(ultima_reserva, nueva_reserva):
+    """Calcula el intervalo mínimo requerido y el tipo de relación."""
+    cat_nueva = nueva_reserva.get("Categoria_viaje", "Desconocida")
+    cat_ultima = ultima_reserva.get("Categoria_viaje", "Desconocida")
+    hora_nueva = nueva_reserva.get("HoraFecha")
+
+    if pd.isna(hora_nueva):
+        return "Error Hora", 99999
+
+    if cat_nueva != cat_ultima or cat_nueva in ["Interregional", "Divisiones"]:
+        return "Cambio/Especial", INTERVALO_CAMBIO_INTERREGIONAL
+
+    if cat_nueva == "Urbano":
+        intervalo = INTERVALO_URBANO_NOCTURNO if 0 <= hora_nueva.hour < 6 else INTERVALO_URBANO_DIURNO
+        tipo = "Urbano nocturno" if 0 <= hora_nueva.hour < 6 else "Urbano diurno"
+        return tipo, intervalo
+
+    return "General", INTERVALO_GENERAL
+
+def monto_total_movil(movil_reservas):
+    """Calcula el monto total de las reservas en un móvil, manejando NaNs."""
+    monto = 0
+    for r in movil_reservas:
+        pago = r.get("estimated_payment", 0)
+        if pd.notnull(pago):
+            monto += pago
+    return monto
+
+def puede_agregarse_a_movil(movil_reservas, nueva_reserva):
+    """Verifica si una nueva reserva puede agregarse a un móvil existente."""
+    # Chequeo 1: Máximo de reservas
+    if len(movil_reservas) >= max_reservas_param:
         return False, None, None, "Máximo de reservas alcanzado"
-    ultima = movil[-1]
-    tipo_int, intervalo_base = calcular_intervalo(ultima, nueva)
-    intervalo = max(intervalo_base, int(nueva["avg_travel_time"] * 1.5)) if pd.notnull(nueva.get("avg_travel_time")) else intervalo_base
-    if nueva["HoraFecha"] < ultima["HoraFecha"] + timedelta(minutes=intervalo):
-        return False, None, None, f"No respeta intervalo ({intervalo} min)"
-    if monto_total_movil(movil) + nueva["estimated_payment"] > MAX_MONTO_POR_MOVIL:
-        return False, None, None, f"Excede monto máximo (${MAX_MONTO_POR_MOVIL:,.0f})"
-    if (max(ultima["HoraFecha"], nueva["HoraFecha"]) - movil[0]["HoraFecha"]).total_seconds() / 3600 > MAX_HORAS_POR_MOVIL:
-        return False, None, None, f"Excede {MAX_HORAS_POR_MOVIL} horas de ruta"
-    divisiones = [r["Categoria_viaje"] for r in movil]
-    num_interregional = divisiones.count("Interregional")
-    num_urbano = divisiones.count("Urbano")
-    divisiones_unicas_otras = set(d for d in divisiones if d not in ["Interregional", "Urbano"])
-    nueva_division = nueva["Categoria_viaje"]
-    nueva_es_interregional = nueva_division == "Interregional"
-    nueva_es_urbano = nueva_division == "Urbano"
-    nueva_es_otra = not (nueva_es_interregional or nueva_es_urbano)
 
-    if nueva_es_interregional and num_interregional >= 2:
-        return False, None, None, "Máximo 2 Interregionales"
-    if nueva_es_otra and len(divisiones_unicas_otras) >= 2 and nueva_division not in divisiones_unicas_otras:
-        return False, None, None, "Máximo 2 divisiones distintas"
-    if num_urbano >= 1 or nueva_es_urbano:
-        total_interregional = num_interregional + int(nueva_es_interregional)
-        total_otras = len(divisiones_unicas_otras) + int(nueva_es_otra and nueva_division not in divisiones_unicas_otras)
-        if total_interregional > 2:
-            return False, None, None, "Con más de un Urbano se permiten hasta 2 Interregionales"
-        if total_otras > 2:
-            return False, None, None, "Con más de un Urbano se permiten hasta 2 divisiones distintas"
-        if total_interregional > 1 and total_otras > 1:
-            return False, None, None, "Con más de un Urbano: máximo 1 división distinta y 1 Interregional"
-    return True, tipo_int, intervalo, None
+    ultima_reserva = movil_reservas[-1]
+    nueva_hora = nueva_reserva.get("HoraFecha")
+    nueva_monto = nueva_reserva.get("estimated_payment", 0)
+    avg_travel_time = nueva_reserva.get("avg_travel_time")
+    cat_nueva = nueva_reserva.get("Categoria_viaje", "Desconocida")
 
-# ⬇️ Interfaz para cargar archivos con Streamlit
-st.header("Cargar Archivos CSV")
-uploaded_file_hist = st.file_uploader("Subir archivo de Históricos (.csv)", type="csv")
-uploaded_file_pred = st.file_uploader("Subir archivo de Predicciones (.csv)", type="csv")
+    if pd.isna(nueva_hora) or pd.isna(nueva_monto):
+         return False, None, None, "Datos inválidos en reserva (Hora o Monto)"
+    ultima_hora = ultima_reserva.get("HoraFecha")
+    if pd.isna(ultima_hora):
+        return False, None, None, "Datos inválidos en última reserva del móvil"
+
+    # Chequeo 2: Intervalo de tiempo
+    tipo_int, intervalo_base = calcular_intervalo(ultima_reserva, nueva_reserva)
+    intervalo_min_requerido = intervalo_base
+    if pd.notnull(avg_travel_time) and avg_travel_time > 0:
+        intervalo_min_requerido = max(intervalo_base, int(avg_travel_time * INTERVALO_MIN_DEFAULT_FACTOR))
+    if nueva_hora < ultima_hora + timedelta(minutes=intervalo_min_requerido):
+        return False, None, None, f"Intervalo < {intervalo_min_requerido} min"
+
+    # Chequeo 3: Monto máximo
+    if monto_total_movil(movil_reservas) + (nueva_monto if pd.notnull(nueva_monto) else 0) > max_monto_param:
+        return False, None, None, f"Excede monto máximo (${max_monto_param:,.0f})"
+
+    # Chequeo 4: Horas máximas de ruta
+    primera_hora = movil_reservas[0].get("HoraFecha")
+    if pd.isna(primera_hora):
+         return False, None, None, "Datos inválidos en primera reserva del móvil"
+    duracion_total_horas = (nueva_hora - primera_hora).total_seconds() / 3600
+    if duracion_total_horas > max_horas_param:
+        return False, None, None, f"Excede {max_horas_param} horas de ruta"
+
+    # Chequeo 5: Reglas de Categoría/División
+    categorias_actuales = [r.get("Categoria_viaje", "Desconocida") for r in movil_reservas]
+    num_interregional_actual = categorias_actuales.count("Interregional")
+    num_urbano_actual = categorias_actuales.count("Urbano")
+    otras_divisiones_unicas_actuales = set(d for d in categorias_actuales if d not in ["Interregional", "Urbano", "Desconocida"])
+    es_nueva_interregional = cat_nueva == "Interregional"
+    es_nueva_urbano = cat_nueva == "Urbano"
+    es_nueva_otra_division = cat_nueva not in ["Interregional", "Urbano", "Desconocida"]
+
+    if es_nueva_interregional and num_interregional_actual >= MAX_INTERREGIONALES_POR_MOVIL:
+        return False, None, None, f"Máximo {MAX_INTERREGIONALES_POR_MOVIL} Interregionales"
+    if es_nueva_otra_division and len(otras_divisiones_unicas_actuales) >= MAX_OTRAS_DIVISIONES_POR_MOVIL and cat_nueva not in otras_divisiones_unicas_actuales:
+        return False, None, None, f"Máximo {MAX_OTRAS_DIVISIONES_POR_MOVIL} divisiones distintas (otras)"
+    if num_urbano_actual >= 1 or es_nueva_urbano:
+        total_interregional = num_interregional_actual + int(es_nueva_interregional)
+        total_otras_divisiones = len(otras_divisiones_unicas_actuales) + int(es_nueva_otra_division and cat_nueva not in otras_divisiones_unicas_actuales)
+        if total_interregional > MAX_INTERREGIONALES_POR_MOVIL:
+            return False, None, None, f"Con Urbanos, máx {MAX_INTERREGIONALES_POR_MOVIL} Interregionales"
+        if total_otras_divisiones > MAX_OTRAS_DIVISIONES_POR_MOVIL:
+            return False, None, None, f"Con Urbanos, máx {MAX_OTRAS_DIVISIONES_POR_MOVIL} divisiones distintas (otras)"
+        if total_interregional > 1 and total_otras_divisiones > 1:
+             return False, None, None, "Con Urbanos: no >1 Interregional y >1 división distinta (otra) simultáneamente"
+
+    return True, tipo_int, intervalo_min_requerido, None
+# --- Fin Funciones Auxiliares ---
+
+
+# --- Interfaz Streamlit ---
+st.header("Cargar Archivos CSV para Asignación de Móviles")
+
+uploaded_file_hist = st.file_uploader("1. Subir archivo Históricos (ej: distancias H3 1.7 (Hist).csv)", type="csv", key="hist_uploader")
+uploaded_file_pred = st.file_uploader("2. Subir archivo Predicciones (ej: distancias H3 1.5 (pred).csv)", type="csv", key="pred_uploader")
 
 if uploaded_file_hist is not None and uploaded_file_pred is not None:
-    boton_ejecutar = st.button("Ejecutar Asignación")
+
+    boton_ejecutar = st.button("🚀 Ejecutar Asignación")
 
     if boton_ejecutar:
-        try:
-            df_hist = pd.read_csv(uploaded_file_hist)
-            df_pred = pd.read_csv(uploaded_file_pred)
+        df_hist = None
+        df_pred = None
+        summary_df = None
+        df_sorted = None
+        st.write("---") # Separador visual
 
-            with st.spinner('Procesando archivos...'):
-                df_hist['h3_origin'] = df_hist.apply(lambda row: simulate_h3(row['latrecogida'], row['lonrecogida']), axis=1)
-                df_hist['h3_destino'] = df_hist.apply(lambda row: simulate_h3(row['latdestino'], row['londestino']), axis=1)
-                df_hist['distance_km'] = df_hist.apply(lambda row: haversine(row['latrecogida'], row['lonrecogida'], row['latdestino'], row['londestino']), axis=1)
-                avg_distances_df = df_hist.groupby(['h3_origin', 'h3_destino'])['distance_km'].mean().reset_index(name='avg_distance_km')
-                avg_times_df = df_hist.groupby(['h3_origin', 'h3_destino'])['tiempoestimada'].mean().reset_index(name='avg_travel_time_min')
-                summary_df = pd.merge(avg_distances_df, avg_times_df, on=['h3_origin', 'h3_destino'], how='outer')
+        # --- Fase 1: Lectura y Validación Inicial ---
+        # Usamos st.expander para hacer esta sección desplegable
+        with st.expander("👁️ FASE 1: Lectura y Validación de Archivos", expanded=False):
+            with st.spinner('Leyendo y validando archivos...'):
+                # Leer archivo histórico
+                try:
+                    df_hist = pd.read_csv(uploaded_file_hist)
+                    st.write(f"✔️ Archivo histórico '{uploaded_file_hist.name}' leído.")
+                    check_columns(df_hist, REQUIRED_HIST_COLS, uploaded_file_hist.name)
+                    st.write(f"✔️ Columnas requeridas encontradas en archivo histórico.")
+                except pd.errors.EmptyDataError:
+                    st.error(f"Error Crítico: El archivo histórico '{uploaded_file_hist.name}' está vacío.")
+                    st.stop()
+                except Exception as e:
+                    st.error(f"Error Crítico al leer o validar el archivo histórico '{uploaded_file_hist.name}': {e}")
+                    st.stop()
 
-                def get_average_time(o, d):
-                    row = summary_df[(summary_df['h3_origin'] == o) & (summary_df['h3_destino'] == d)]
-                    return row['avg_travel_time_min'].values[0] if not row.empty else np.nan
+                # Leer archivo de predicciones
+                try:
+                    df_pred = pd.read_csv(uploaded_file_pred)
+                    st.write(f"✔️ Archivo de predicciones '{uploaded_file_pred.name}' leído.")
+                    check_columns(df_pred, REQUIRED_PRED_COLS_ORIGINAL, uploaded_file_pred.name)
+                    st.write(f"✔️ Columnas originales requeridas encontradas en archivo de predicciones.")
+                except pd.errors.EmptyDataError:
+                    st.error(f"Error Crítico: El archivo de predicciones '{uploaded_file_pred.name}' está vacío.")
+                    st.stop()
+                except Exception as e:
+                    st.error(f"Error Crítico al leer o validar el archivo de predicciones '{uploaded_file_pred.name}': {e}")
+                    st.stop()
 
-                df = df_pred.rename(columns={"pickup_datetime": "HoraFecha", "job_id": "reserva"})
-                df["HoraFecha"] = pd.to_datetime(df["HoraFecha"])
-                if "estimated_payment" not in df.columns:
-                    st.error("Falta la columna 'estimated_payment' en el archivo de predicciones.")
-                    raise ValueError("Falta la columna 'estimated_payment'")
-                df['distance_km'] = df.apply(lambda row: haversine(row['latrecogida'], row['lonrecogida'], row['latdestino'], row['londestino']), axis=1)
-                df['h3_origin'] = df.apply(lambda row: simulate_h3(row['latrecogida'], row['lonrecogida']), axis=1)
-                df['h3_destino'] = df.apply(lambda row: simulate_h3(row['latdestino'], row['londestino']), axis=1)
-                df['avg_travel_time'] = df.apply(lambda row: get_average_time(row['h3_origin'], row['h3_destino']), axis=1)
-                df_sorted = df.sort_values(by=["HoraFecha", "estimated_payment"], ascending=[True, False]).reset_index(drop=True)
+                # Renombrar columnas de predicciones
+                try:
+                    df_pred.rename(columns=RENAME_MAP_PRED, inplace=True)
+                    check_columns(df_pred, REQUIRED_PRED_COLS_RENAMED, f"{uploaded_file_pred.name} (después de renombrar)")
+                    st.write(f"✔️ Columnas renombradas y verificadas en predicciones.")
+                except KeyError as e:
+                    st.error(f"Error Crítico al renombrar columna: La columna original '{e}' definida en `RENAME_MAP_PRED` no se encontró en '{uploaded_file_pred.name}'. Ajusta `RENAME_MAP_PRED` en el script.")
+                    st.stop()
+                except Exception as e:
+                     st.error(f"Error inesperado durante el renombrado de columnas: {e}")
+                     st.stop()
 
-                moviles = []
-                rutas_asignadas = []
-                reservas_no_asignadas = []
+                # Convertir tipos de datos importantes
+                try:
+                    df_pred["HoraFecha"] = pd.to_datetime(df_pred["HoraFecha"], errors='coerce')
+                    if df_pred["HoraFecha"].isnull().any():
+                        st.warning(f"⚠️ Algunas fechas en 'HoraFecha' no pudieron ser convertidas.")
+                    df_hist['tiempoestimada'] = pd.to_numeric(df_hist['tiempoestimada'], errors='coerce')
+                    if df_hist['tiempoestimada'].isnull().any():
+                        st.warning(f"⚠️ Algunos valores en 'tiempoestimada' (histórico) no son numéricos.")
+                    df_pred['estimated_payment'] = pd.to_numeric(df_pred['estimated_payment'], errors='coerce')
+                    if df_pred['estimated_payment'].isnull().any():
+                         st.warning(f"⚠️ Algunos valores en 'estimated_payment' (predicciones) no son numéricos.")
+                    st.write(f"✔️ Tipos de datos convertidos (Fecha, Tiempo Histórico, Pago).")
+                except Exception as e:
+                    st.error(f"Error Crítico durante la conversión de tipos de datos: {e}")
+                    st.stop()
+            st.success("Fase 1 completada.") # Mensaje al final del expander
 
-                for _, reserva in df_sorted.iterrows():
-                    reserva_data = reserva.to_dict()
-                    asignado = False
+        # --- Fase 2: Procesamiento de Datos Históricos ---
+        with st.expander("⚙️ FASE 2: Procesamiento Histórico", expanded=False):
+            with st.spinner('Calculando rutas y promedios históricos...'):
+                try:
+                    df_hist['h3_origin'] = simulate_h3_vectorized(df_hist['latrecogida'], df_hist['lonrecogida'])
+                    df_hist['h3_destino'] = simulate_h3_vectorized(df_hist['latdestino'], df_hist['londestino'])
+                    df_hist['distance_km'] = haversine_vectorized(df_hist['latrecogida'], df_hist['lonrecogida'], df_hist['latdestino'], df_hist['londestino'])
+                    st.write(f"✔️ H3 simulado y distancias calculadas para datos históricos.")
 
-                    if len(moviles) < MAX_MOVILES:
-                        reserva_data['tiempo_estimado_min'] = get_average_time(reserva['h3_origin'], reserva['h3_destino'])
-                        reserva_data['estimated_arrival'] = reserva['HoraFecha'] + timedelta(minutes=reserva_data['tiempo_estimado_min'] if pd.notnull(reserva_data['tiempo_estimado_min']) else 0)
-                        moviles.append([reserva_data])
-                        rutas_asignadas.append({"movil_id": len(moviles), **reserva_data, "tipo_relacion": "Inicio", "min_intervalo": 0})
-                        continue
+                    avg_times_df = df_hist.dropna(subset=['tiempoestimada']).groupby(['h3_origin', 'h3_destino'], as_index=False)['tiempoestimada'].mean().rename(columns={'tiempoestimada': 'avg_travel_time'})
+                    summary_df = avg_times_df
+                    st.write(f"✔️ Tiempo promedio por ruta H3 calculado ({len(summary_df)} rutas únicas).")
+                    if summary_df.empty:
+                         st.warning("⚠️ No se pudieron calcular rutas promedio desde los datos históricos.")
+                except Exception as e:
+                    st.error(f"Error Crítico durante el procesamiento de datos históricos: {e}")
+                    st.error(f"Traceback: {traceback.format_exc()}")
+                    st.stop()
+            st.success("Fase 2 completada.")
 
-                    for movil_id, movil in enumerate(moviles, start=1):
-                        puede_agregar, tipo_relacion, intervalo, motivo = puede_agregarse_a_movil(movil, reserva_data)
-                        if puede_agregar:
-                            reserva_data['tiempo_estimado_min'] = get_average_time(reserva['h3_origin'], reserva['h3_destino'])
-                            reserva_data['estimated_arrival'] = reserva['HoraFecha'] + timedelta(minutes=reserva_data['tiempo_estimado_min'] if pd.notnull(reserva_data['tiempo_estimado_min']) else 0)
-                            movil.append(reserva_data)
-                            rutas_asignadas.append({"movil_id": movil_id, **reserva_data, "tipo_relacion": tipo_relacion, "min_intervalo": intervalo})
+        # --- Fase 3: Procesamiento de Predicciones ---
+        with st.expander("📈 FASE 3: Procesamiento Predicciones", expanded=False):
+            with st.spinner('Calculando rutas de predicciones y buscando tiempos promedio...'):
+                try:
+                    df_pred['h3_origin'] = simulate_h3_vectorized(df_pred['latrecogida'], df_pred['lonrecogida'])
+                    df_pred['h3_destino'] = simulate_h3_vectorized(df_pred['latdestino'], df_pred['londestino'])
+                    st.write(f"✔️ H3 simulado calculado para predicciones.")
+
+                    if summary_df is not None and not summary_df.empty:
+                        df = pd.merge(df_pred, summary_df[['h3_origin', 'h3_destino', 'avg_travel_time']], on=['h3_origin', 'h3_destino'], how='left')
+                        st.write(f"✔️ Tiempos promedio unidos a las predicciones.")
+                        num_matched = df['avg_travel_time'].notna().sum()
+                        st.write(f"   ({num_matched} de {len(df)} predicciones encontraron un tiempo promedio histórico)")
+                    else:
+                        st.warning("⚠️ No hay datos históricos promedio, no se asignarán tiempos promedio.")
+                        df = df_pred.copy()
+                        df['avg_travel_time'] = np.nan
+
+                    valid_time_mask = df['avg_travel_time'].notna() & df['HoraFecha'].notna()
+                    df['estimated_arrival'] = pd.NaT
+                    df.loc[valid_time_mask, 'estimated_arrival'] = df.loc[valid_time_mask, 'HoraFecha'] + pd.to_timedelta(df.loc[valid_time_mask, 'avg_travel_time'], unit='m')
+                    st.write(f"✔️ Hora estimada de llegada calculada.")
+
+                    df['estimated_payment'].fillna(0, inplace=True)
+                    df_sorted = df.sort_values(by=["HoraFecha", "estimated_payment"], ascending=[True, False], na_position='last').reset_index(drop=True)
+                    df_sorted.dropna(subset=['HoraFecha'], inplace=True) # Eliminar filas sin fecha válida
+                    st.write(f"✔️ Predicciones ordenadas y filtradas ({len(df_sorted)} válidas).")
+                except Exception as e:
+                    st.error(f"Error Crítico durante el procesamiento de predicciones: {e}")
+                    st.error(f"Traceback: {traceback.format_exc()}")
+                    st.stop()
+            st.success("Fase 3 completada.")
+
+        # --- Fase 4: Algoritmo de Asignación ---
+        with st.expander("🚚 FASE 4: Asignación de Reservas", expanded=False):
+            with st.spinner('Asignando reservas a móviles...'):
+                try:
+                    moviles = []
+                    rutas_asignadas_list = []
+                    reservas_no_asignadas_list = []
+                    reservas_a_procesar = df_sorted.to_dict('records')
+                    num_total_reservas = len(reservas_a_procesar)
+                    st.write(f"Iniciando asignación para {num_total_reservas} reservas válidas...")
+
+                    # --- Barra de Progreso ---
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    # -------------------------
+
+                    for i, reserva in enumerate(reservas_a_procesar):
+                        # --- Actualizar Progreso ---
+                        progress_percentage = (i + 1) / num_total_reservas
+                        progress_bar.progress(progress_percentage)
+                        status_text.text(f"Procesando reserva {i+1}/{num_total_reservas}...")
+                        # -------------------------
+
+                        asignado = False
+                        motivo_final_no_asignado = "No se encontró móvil compatible"
+
+                        for idx, movil_actual in enumerate(moviles):
+                            puede_agregar, tipo_relacion, intervalo, motivo = puede_agregarse_a_movil(movil_actual, reserva)
+                            motivo_final_no_asignado = motivo
+                            if puede_agregar:
+                                movil_actual.append(reserva)
+                                rutas_asignadas_list.append({
+                                    "movil_id": idx + 1, **reserva,
+                                    "tipo_relacion": tipo_relacion, "min_intervalo_aplicado": intervalo
+                                })
+                                asignado = True
+                                break
+
+                        if not asignado and len(moviles) < max_moviles_param:
+                            moviles.append([reserva])
+                            rutas_asignadas_list.append({
+                                "movil_id": len(moviles), **reserva,
+                                "tipo_relacion": "Inicio Ruta", "min_intervalo_aplicado": 0
+                            })
                             asignado = True
-                            break
 
-                    if not asignado:
-                        reserva_data["motivo_no_asignado"] = motivo or "No cumple restricciones"
-                        reservas_no_asignadas.append(reserva_data)
+                        if not asignado:
+                            if motivo_final_no_asignado is None:
+                                motivo_final_no_asignado = "Límite de móviles o restricción no evaluada"
+                            reserva["motivo_no_asignado"] = motivo_final_no_asignado
+                            reservas_no_asignadas_list.append(reserva)
 
-                df_rutas = pd.DataFrame(rutas_asignadas)
-                df_no_asignadas = pd.DataFrame(reservas_no_asignadas)
+                    # --- Limpiar Progreso ---
+                    status_text.text(f"Asignación completada para {num_total_reservas} reservas.")
+                    progress_bar.empty() # Opcional: ocultar la barra al final
+                    # ------------------------
 
-                st.success("✅ Proceso finalizado.")
+                    st.write(f"✔️ Asignación completada.")
+                except Exception as e:
+                    st.error(f"Error Crítico durante la asignación de reservas: {e}")
+                    st.error(f"Traceback: {traceback.format_exc()}")
+                    st.stop()
+            st.success("Fase 4 completada.")
 
-                st.subheader("Rutas Asignadas")
-                st.dataframe(df_rutas)
-                st.download_button(
-                    label="Descargar rutas_asignadas.csv",
-                    data=df_rutas.to_csv(index=False).encode('utf-8'),
-                    file_name="rutas_asignadas.csv",
-                    mime="text/csv",
-                )
 
-                st.subheader("Reservas No Asignadas")
-                st.dataframe(df_no_asignadas)
-                st.download_button(
-                    label="Descargar reservas_no_asignadas.csv",
-                    data=df_no_asignadas.to_csv(index=False).encode('utf-8'),
-                    file_name="reservas_no_asignadas.csv",
-                    mime="text/csv",
-                )
+        # --- Fase 5: Resultados (Fuera de los expanders) ---
+        st.subheader("🏁 Fase 5: Resultados Finales")
+        try:
+            st.success("✅ Proceso de asignación finalizado.")
+
+            df_rutas = pd.DataFrame(rutas_asignadas_list) if rutas_asignadas_list else pd.DataFrame()
+            df_no_asignadas = pd.DataFrame(reservas_no_asignadas_list) if reservas_no_asignadas_list else pd.DataFrame()
+
+            # Mostrar Resumen
+            st.subheader("📊 Resumen de la Asignación")
+            num_asignadas = len(df_rutas)
+            num_no_asignadas = len(df_no_asignadas)
+            total_reservas_procesadas = num_asignadas + num_no_asignadas # Re-contar por si hubo filtrados
+            num_moviles_usados = len(moviles)
+            monto_total_asignado = df_rutas['estimated_payment'].sum() if not df_rutas.empty else 0
+
+            perc_asignadas = (num_asignadas / total_reservas_procesadas * 100) if total_reservas_procesadas > 0 else 0
+            perc_no_asignadas = (num_no_asignadas / total_reservas_procesadas * 100) if total_reservas_procesadas > 0 else 0
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Reservas Procesadas", f"{total_reservas_procesadas}")
+            col2.metric("Reservas Asignadas", f"{num_asignadas} ({perc_asignadas:.1f}%)")
+            col3.metric("Reservas No Asignadas", f"{num_no_asignadas} ({perc_no_asignadas:.1f}%)")
+
+            col1b, col2b, col3b = st.columns(3)
+            col1b.metric("Móviles Utilizados", f"{num_moviles_usados} / {max_moviles_param}")
+            col2b.metric("Monto Total Asignado", f"${monto_total_asignado:,.0f}")
+
+            # Mostrar DataFrames y botones de descarga
+            st.subheader(" Ruedas Asignadas por Móvil")
+            cols_mostrar_rutas = ['movil_id', 'reserva', 'HoraFecha', 'estimated_arrival', 'estimated_payment', 'Categoria_viaje', 'tipo_relacion', 'min_intervalo_aplicado', 'latrecogida', 'lonrecogida', 'latdestino', 'londestino', 'h3_origin', 'h3_destino', 'avg_travel_time']
+            if not df_rutas.empty:
+                 cols_mostrar_rutas = [col for col in cols_mostrar_rutas if col in df_rutas.columns]
+                 st.dataframe(df_rutas[cols_mostrar_rutas])
+                 st.download_button(label="📥 Descargar rutas_asignadas.csv", data=df_rutas[cols_mostrar_rutas].to_csv(index=False, encoding='utf-8-sig'), file_name="rutas_asignadas.csv", mime="text/csv")
+            else:
+                 st.info("No se asignaron rutas.")
+
+
+            st.subheader("🚨 Reservas No Asignadas")
+            cols_mostrar_no_asignadas = ['reserva', 'HoraFecha', 'estimated_payment', 'Categoria_viaje', 'latrecogida', 'lonrecogida', 'latdestino', 'londestino', 'h3_origin', 'h3_destino', 'avg_travel_time', 'motivo_no_asignado']
+            if not df_no_asignadas.empty:
+                cols_mostrar_no_asignadas = [col for col in cols_mostrar_no_asignadas if col in df_no_asignadas.columns]
+                st.dataframe(df_no_asignadas[cols_mostrar_no_asignadas])
+                st.download_button(label="📥 Descargar reservas_no_asignadas.csv", data=df_no_asignadas[cols_mostrar_no_asignadas].to_csv(index=False, encoding='utf-8-sig'), file_name="reservas_no_asignadas.csv", mime="text/csv")
+            else:
+                 st.info("🎉 Todas las reservas válidas fueron asignadas o no hubo reservas para procesar.")
 
         except Exception as e:
-            st.error(f"Ocurrió un error durante el procesamiento: {e}")
+            st.error(f"❌ Ocurrió un error inesperado durante la presentación de resultados:")
+            st.error(e)
+            st.error(f"Traceback: {traceback.format_exc()}")
+
+
+    # Manejo de error general fuera del botón por si acaso
+    # except Exception as e:
+    #     st.error(f"❌ Ocurrió un error inesperado y fatal durante la ejecución:")
+    #     st.error(e)
+    #     st.error(f"Traceback: {traceback.format_exc()}")
+    #     st.warning("El proceso se ha detenido. Revisa los mensajes de error anteriores para identificar el problema.")
+
+else:
+    st.info("Por favor, carga ambos archivos CSV (Históricos y Predicciones) para habilitar la ejecución.")
