@@ -10,6 +10,8 @@ st.set_page_config(
     page_title="Asignador de Móviles",
     page_icon="🚀"
 )
+# --- Título Principal Visible en la Página ---
+st.title("PreRoute 2.0")             
 
 # --- Constantes ---
 RADIO_TIERRA_KM = 6371
