@@ -2,16 +2,55 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import timedelta
-import traceback # Para mostrar errores detallados
+import traceback
+from PIL import Image # Necesario para cargar la imagen y manejar errores
 
 # --- Configuración de Página (DEBE SER LO PRIMERO de Streamlit) ---
 st.set_page_config(
     layout="wide",
-    page_title="Asignador de Móviles",
-    page_icon="🚀"
+    page_title="PrePlanIt",
+    page_icon="🚀"  # Puedes cambiar esto por la ruta a un archivo .ico si prefieres
 )
-# --- Título Principal Visible en la Página ---
-st.title("PreRoute 2.0")             
+
+# --- Logo y Título en la parte superior ---
+
+# !!! ---------- AJUSTA ESTAS LÍNEAS ---------- !!!
+# 1. Reemplaza 'path/to/your/logo.png' con la ruta real a tu archivo de logo.
+#    Si está en la misma carpeta que el script, solo pon el nombre: 'logo.png'
+#    Si está en una subcarpeta 'img', pon: 'img/logo.png'
+LOGO_PATH = "/workspaces/fran/transvip.png"
+
+# 2. Ajusta el ancho del logo en píxeles según necesites.
+LOGO_WIDTH = 90
+
+# 3. Ajusta la proporción de las columnas. [4, 1] significa que el título
+#    ocupa 4 partes del espacio y el logo 1 parte (empujándolo a la derecha).
+#    Prueba con [3, 1], [5, 1], etc., hasta que te guste.
+COLUMN_RATIO = [12, 1]
+# !!! ------------------------------------------ !!!
+
+
+try:
+    # Crear columnas para título y logo
+    col_title, col_logo = st.columns(COLUMN_RATIO)
+
+    with col_title:
+        st.title("PreRoute 2.0") # Título a la izquierda
+
+    with col_logo:
+        try:
+            # Cargar y mostrar el logo a la derecha
+            logo_image = Image.open(LOGO_PATH)
+            st.image(logo_image, width=LOGO_WIDTH)
+        except FileNotFoundError:
+            st.error(f"⚠️ Error: No se encontró el logo en '{LOGO_PATH}'. Verifica la ruta.")
+        except Exception as e:
+            st.error(f"⚠️ Error al cargar el logo: {e}")
+
+except Exception as e:
+    # Fallback por si falla la creación de columnas (raro)
+    st.warning(f"No se pudo crear el layout para el logo: {e}")
+    st.title("PreRoute 2.0")             
 
 # --- Constantes ---
 RADIO_TIERRA_KM = 6371
