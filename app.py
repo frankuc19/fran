@@ -18,7 +18,7 @@ st.set_page_config(
 # 1. Reemplaza 'path/to/your/logo.png' con la ruta real a tu archivo de logo.
 #    Si está en la misma carpeta que el script, solo pon el nombre: 'logo.png'
 #    Si está en una subcarpeta 'img', pon: 'img/logo.png'
-LOGO_PATH = Image.open("transvip.png")
+LOGO_PATH = "transvip.png"
 
 # 2. Ajusta el ancho del logo en píxeles según necesites.
 LOGO_WIDTH = 90
