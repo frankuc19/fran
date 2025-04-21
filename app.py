@@ -1,138 +1,114 @@
+# app.py
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import timedelta
 import traceback
-from PIL import Image # Necesario para cargar la imagen y manejar errores
+from PIL import Image
+import os
 
-# --- Configuración de Página (DEBE SER LO PRIMERO de Streamlit) ---
+# --- Configuración de Página (solo una vez) ---
 st.set_page_config(
-    layout="wide",
     page_title="PrePlanIt",
-    page_icon="🚀"  # Puedes cambiar esto por la ruta a un archivo .ico si prefieres
+    page_icon="🚀",
+    layout="wide"
 )
 
-# --- Logo y Título en la parte superior ---
+# --- Título y navegación lateral ---
+st.title("Bienvenido a PreRoute de transvip")
+st.sidebar.success("Ajusta los parametros necesarios para realizar el ruteo.")
 
-# !!! ---------- AJUSTA ESTAS LÍNEAS ---------- !!!
-# 1. Reemplaza 'path/to/your/logo.png' con la ruta real a tu archivo de logo.
-#    Si está en la misma carpeta que el script, solo pon el nombre: 'logo.png'
-#    Si está en una subcarpeta 'img', pon: 'img/logo.png'
-LOGO_PATH = "transvip.png"
+st.markdown(
+    """
+    Esta es la página principal de la aplicación.
+    Usa la barra lateral para navegar a otras secciones
+    """
+)
 
-# 2. Ajusta el ancho del logo en píxeles según necesites.
+# --- Logo y Título ---
+LOGO_PATH = "transvip.png"  # Ruta relativa
 LOGO_WIDTH = 90
-
-# 3. Ajusta la proporción de las columnas. [4, 1] significa que el título
-#    ocupa 4 partes del espacio y el logo 1 parte (empujándolo a la derecha).
-#    Prueba con [3, 1], [5, 1], etc., hasta que te guste.
 COLUMN_RATIO = [12, 1]
-# !!! ------------------------------------------ !!!
-
 
 try:
-    # Crear columnas para título y logo
     col_title, col_logo = st.columns(COLUMN_RATIO)
 
     with col_title:
-        st.title("PreRoute 2.0") # Título a la izquierda
+        st.title("PreRoute 2.0")
 
     with col_logo:
         try:
-            # Cargar y mostrar el logo a la derecha
-            logo_image = Image.open(LOGO_PATH)
-            st.image(logo_image, width=LOGO_WIDTH)
-        except FileNotFoundError:
-            st.error(f"⚠️ Error: No se encontró el logo en '{LOGO_PATH}'. Verifica la ruta.")
+            if os.path.exists(LOGO_PATH):
+                logo_image = Image.open(LOGO_PATH)
+                st.image(logo_image, width=LOGO_WIDTH)
+            else:
+                st.error(f"⚠️ Error: No se encontró el logo en '{LOGO_PATH}'. Verifica la ruta.")
         except Exception as e:
             st.error(f"⚠️ Error al cargar el logo: {e}")
 
 except Exception as e:
-    # Fallback por si falla la creación de columnas (raro)
     st.warning(f"No se pudo crear el layout para el logo: {e}")
-    st.title("PreRoute 2.0")             
+    st.title("PreRoute 2.0")
 
 # --- Constantes ---
 RADIO_TIERRA_KM = 6371
 PRECISION_SIMULATE_H3 = 3
 
-# Intervalos (en minutos) - AJUSTA ESTOS VALORES SI TU LÓGICA DE NEGOCIO ES DIFERENTE
 INTERVALO_CAMBIO_INTERREGIONAL = 270
 INTERVALO_URBANO_NOCTURNO = 70
 INTERVALO_URBANO_DIURNO = 80
 INTERVALO_GENERAL = 80
 INTERVALO_MIN_DEFAULT_FACTOR = 1.5
 
-# Límites de categoría - AJUSTA ESTOS VALORES SI TU LÓGICA DE NEGOCIO ES DIFERENTE
 MAX_INTERREGIONALES_POR_MOVIL = 2
 MAX_OTRAS_DIVISIONES_POR_MOVIL = 2
 
-# --- Columnas Esperadas en los Archivos CSV ---
-# !!! ### AJUSTAR AQUÍ SI ES NECESARIO ### !!!
-# Modifica estas listas si los nombres de las columnas en TUS archivos CSV son diferentes.
 REQUIRED_HIST_COLS = [
-    'latrecogida',         # Asegúrate que este nombre coincida con tu CSV Histórico
-    'lonrecogida',         # REEMPLAZA si tu CSV Histórico usa otro nombre para longitud recogida
-    'latdestino',          # REEMPLAZA si tu CSV Histórico usa otro nombre para latitud destino
-    'londestino',          # REEMPLAZA si tu CSV Histórico usa otro nombre para longitud destino
-    'tiempoestimada'       # REEMPLAZA si tu CSV Histórico usa otro nombre para tiempo histórico (minutos)
+    'latrecogida', 'lonrecogida', 'latdestino', 'londestino', 'tiempoestimada'
 ]
 REQUIRED_PRED_COLS_ORIGINAL = [
-    'pickup_datetime',
-    'job_id',
-    'estimated_payment',
-    'Categoria_viaje',
-    'latrecogida',
-    'lonrecogida',
-    'latdestino',
-    'londestino'
+    'pickup_datetime', 'job_id', 'estimated_payment',
+    'Categoria_viaje', 'latrecogida', 'lonrecogida',
+    'latdestino', 'londestino'
 ]
 RENAME_MAP_PRED = {
     'pickup_datetime': 'HoraFecha',
     'job_id': 'reserva',
 }
 REQUIRED_PRED_COLS_RENAMED = list(RENAME_MAP_PRED.values()) + [
-    'estimated_payment', 'Categoria_viaje', 'latrecogida', 'lonrecogida', 'latdestino', 'londestino'
+    'estimated_payment', 'Categoria_viaje',
+    'latrecogida', 'lonrecogida', 'latdestino', 'londestino'
 ]
 
-
-# --- Parámetros Configurables ---
+# --- Parámetros configurables por el usuario ---
 st.sidebar.header("Parámetros de Asignación")
-max_moviles_param = st.sidebar.slider('Máximo de Móviles:', 1, 500, 100, key="max_moviles")
-max_monto_param = st.sidebar.slider('Monto Máximo por Móvil ($):', 100000, 1000000, 500000, step=50000, key="max_monto")
-max_reservas_param = st.sidebar.slider('Máximo de Reservas por Móvil:', 1, 10, 3, key="max_reservas")
-max_horas_param = st.sidebar.slider('Máximo de Horas por Móvil:', 1, 24, 10, key="max_horas")
-
+max_moviles_param = st.sidebar.slider('Máximo de Móviles:', 1, 500, 100)
+max_monto_param = st.sidebar.slider('Monto Máximo por Móvil ($):', 100000, 1000000, 500000, step=50000)
+max_reservas_param = st.sidebar.slider('Máximo de Reservas por Móvil:', 1, 10, 3)
+max_horas_param = st.sidebar.slider('Máximo de Horas por Móvil:', 1, 24, 10)
 
 # --- Funciones Auxiliares ---
-# (Las funciones check_columns, haversine_vectorized, simulate_h3_vectorized,
-# calcular_intervalo, monto_total_movil, puede_agregarse_a_movil
-# permanecen exactamente iguales que en la versión anterior)
 def check_columns(df, required_columns, filename):
-    """Verifica si un DataFrame contiene las columnas requeridas."""
     missing_cols = [col for col in required_columns if col not in df.columns]
     if missing_cols:
-        st.error(f"Error Crítico: Faltan las siguientes columnas obligatorias en el archivo '{filename}': {', '.join(missing_cols)}. Por favor, verifica el archivo CSV o ajusta las listas `REQUIRED_..._COLS` en el script.")
+        st.error(f"Error Crítico: Faltan columnas en '{filename}': {', '.join(missing_cols)}.")
         st.stop()
 
 def haversine_vectorized(lat1, lon1, lat2, lon2):
-    """Calcula la distancia Haversine de forma vectorizada."""
     lon1, lat1, lon2, lat2 = map(np.radians, [lon1, lat1, lon2, lat2])
     dlon = lon2 - lon1
     dlat = lat2 - lat1
     a = np.sin(dlat/2.0)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2.0)**2
     c = 2 * np.arcsin(np.sqrt(a))
-    km = RADIO_TIERRA_KM * c
-    return km
+    return RADIO_TIERRA_KM * c
 
 def simulate_h3_vectorized(lats, lons, precision=PRECISION_SIMULATE_H3):
-    """Genera un ID símil-H3 basado en redondeo (vectorizado)."""
     lats = pd.to_numeric(lats, errors='coerce')
     lons = pd.to_numeric(lons, errors='coerce')
     return lats.round(precision).astype(str) + "_" + lons.round(precision).astype(str)
 
 def calcular_intervalo(ultima_reserva, nueva_reserva):
-    """Calcula el intervalo mínimo requerido y el tipo de relación."""
     cat_nueva = nueva_reserva.get("Categoria_viaje", "Desconocida")
     cat_ultima = ultima_reserva.get("Categoria_viaje", "Desconocida")
     hora_nueva = nueva_reserva.get("HoraFecha")
@@ -144,14 +120,14 @@ def calcular_intervalo(ultima_reserva, nueva_reserva):
         return "Cambio/Especial", INTERVALO_CAMBIO_INTERREGIONAL
 
     if cat_nueva == "Urbano":
-        intervalo = INTERVALO_URBANO_NOCTURNO if 0 <= hora_nueva.hour < 6 else INTERVALO_URBANO_DIURNO
-        tipo = "Urbano nocturno" if 0 <= hora_nueva.hour < 6 else "Urbano diurno"
-        return tipo, intervalo
+        if 0 <= hora_nueva.hour < 6:
+            return "Urbano nocturno", INTERVALO_URBANO_NOCTURNO
+        else:
+            return "Urbano diurno", INTERVALO_URBANO_DIURNO
 
     return "General", INTERVALO_GENERAL
 
 def monto_total_movil(movil_reservas):
-    """Calcula el monto total de las reservas en un móvil, manejando NaNs."""
     monto = 0
     for r in movil_reservas:
         pago = r.get("estimated_payment", 0)
@@ -160,22 +136,21 @@ def monto_total_movil(movil_reservas):
     return monto
 
 def puede_agregarse_a_movil(movil_reservas, nueva_reserva):
-    """Verifica si una nueva reserva puede agregarse a un móvil existente."""
-    # Chequeo 1: Máximo de reservas
     if len(movil_reservas) >= max_reservas_param:
         return False, None, None, "Máximo de reservas alcanzado"
 
     ultima_reserva = movil_reservas[-1]
     nueva_hora = nueva_reserva.get("HoraFecha")
-    nueva_monto = nueva_reserva.get("estimated_payment", 0)
     avg_travel_time = nueva_reserva.get("avg_travel_time")
+    nueva_monto = nueva_reserva.get("estimated_payment", 0)
     cat_nueva = nueva_reserva.get("Categoria_viaje", "Desconocida")
 
     if pd.isna(nueva_hora) or pd.isna(nueva_monto):
-         return False, None, None, "Datos inválidos en reserva (Hora o Monto)"
+        return False, None, None, "Datos inválidos en reserva"
+
     ultima_hora = ultima_reserva.get("HoraFecha")
     if pd.isna(ultima_hora):
-        return False, None, None, "Datos inválidos en última reserva del móvil"
+        return False, None, None, "Hora inválida en última reserva"
 
     # Chequeo 2: Intervalo de tiempo
     tipo_int, intervalo_base = calcular_intervalo(ultima_reserva, nueva_reserva)
@@ -222,7 +197,6 @@ def puede_agregarse_a_movil(movil_reservas, nueva_reserva):
 
     return True, tipo_int, intervalo_min_requerido, None
 # --- Fin Funciones Auxiliares ---
-
 
 # --- Interfaz Streamlit ---
 st.header("Cargar Archivos CSV para Asignación de Móviles")
@@ -277,7 +251,7 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
                     check_columns(df_pred, REQUIRED_PRED_COLS_RENAMED, f"{uploaded_file_pred.name} (después de renombrar)")
                     st.write(f"✔️ Columnas renombradas y verificadas en predicciones.")
                 except KeyError as e:
-                    st.error(f"Error Crítico al renombrar columna: La columna original '{e}' definida en `RENAME_MAP_PRED` no se encontró en '{uploaded_file_pred.name}'. Ajusta `RENAME_MAP_PRED` en el script.")
+                    st.error(f"Error Crítico al renombrar columna: La columna original '{e}' definida en RENAME_MAP_PRED no se encontró en '{uploaded_file_pred.name}'. Ajusta RENAME_MAP_PRED en el script.")
                     st.stop()
                 except Exception as e:
                      st.error(f"Error inesperado durante el renombrado de columnas: {e}")
