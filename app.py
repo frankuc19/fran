@@ -276,22 +276,42 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
 
         # --- Fase 2: Procesamiento de Datos Históricos ---
         with st.expander("⚙️ FASE 2: Procesamiento Histórico", expanded=False):
-            with st.spinner('Calculando rutas y promedios históricos...'):
-                try:
-                    df_hist['h3_origin'] = simulate_h3_vectorized(df_hist['latrecogida'], df_hist['lonrecogida'])
-                    df_hist['h3_destino'] = simulate_h3_vectorized(df_hist['latdestino'], df_hist['londestino'])
-                    df_hist['distance_km'] = haversine_vectorized(df_hist['latrecogida'], df_hist['lonrecogida'], df_hist['latdestino'], df_hist['londestino'])
-                    st.write(f"✔️ H3 simulado y distancias calculadas para datos históricos.")
+          with st.spinner('Calculando rutas y promedios históricos...'):
+            try:
+                # Asignación de H3 y cálculo de distancia con funciones vectorizadas
+                df_hist['h3_origin'] = simulate_h3_vectorized(df_hist['latrecogida'], df_hist['lonrecogida'])
+                df_hist['h3_destino'] = simulate_h3_vectorized(df_hist['latdestino'], df_hist['londestino'])
+                df_hist['distance_km'] = haversine_vectorized(df_hist['latrecogida'], df_hist['lonrecogida'],
+                                                            df_hist['latdestino'], df_hist['londestino'])
+                st.write("✔️ H3 simulado y distancias calculadas para datos históricos.")
 
-                    avg_times_df = df_hist.dropna(subset=['tiempoestimada']).groupby(['h3_origin', 'h3_destino'], as_index=False)['tiempoestimada'].mean().rename(columns={'tiempoestimada': 'avg_travel_time'})
-                    summary_df = avg_times_df
-                    st.write(f"✔️ Tiempo promedio por ruta H3 calculado ({len(summary_df)} rutas únicas).")
-                    if summary_df.empty:
-                         st.warning("⚠️ No se pudieron calcular rutas promedio desde los datos históricos.")
-                except Exception as e:
-                    st.error(f"Error Crítico durante el procesamiento de datos históricos: {e}")
-                    st.error(f"Traceback: {traceback.format_exc()}")
-                    st.stop()
+                # Filtrado de registros válidos
+                valid_df = df_hist.dropna(subset=['tiempoestimada', 'distance_km'])
+
+                # Cálculo de promedio de tiempo de viaje
+                avg_times_df = valid_df.groupby(['h3_origin', 'h3_destino'], as_index=False)['tiempoestimada'].mean()
+                avg_times_df.rename(columns={'tiempoestimada': 'avg_travel_time'}, inplace=True)
+
+                # Cálculo de promedio de distancia
+                avg_dist_df = valid_df.groupby(['h3_origin', 'h3_destino'], as_index=False)['distance_km'].mean()
+                avg_dist_df.rename(columns={'distance_km': 'avg_distance_km'}, inplace=True)
+
+                # Combinación en un solo DataFrame resumen
+                summary_df = pd.merge(avg_times_df, avg_dist_df, on=['h3_origin', 'h3_destino'], how='outer')
+
+                st.write(f"✔️ Promedios calculados: {len(summary_df)} rutas únicas.")
+                if summary_df.empty:
+                    st.warning("⚠️ No se pudieron calcular rutas promedio desde los datos históricos.")
+
+                # Función para consultar tiempo promedio
+                def get_average_time(h3_o, h3_d):
+                    row = summary_df[(summary_df['h3_origin'] == h3_o) & (summary_df['h3_destino'] == h3_d)]
+                    return row['avg_travel_time'].values[0] if not row.empty else np.nan
+
+            except Exception as e:
+                st.error(f"Error crítico durante el procesamiento de datos históricos: {e}")
+                st.error(f"Traceback: {traceback.format_exc()}")
+                st.stop()
             st.success("Fase 2 completada.")
 
         # --- Fase 3: Procesamiento de Predicciones ---
@@ -422,7 +442,7 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
 
             # Mostrar DataFrames y botones de descarga
             st.subheader(" Reservas Asignadas por Móvil")
-            cols_mostrar_rutas = ['movil_id', 'reserva', 'HoraFecha', 'estimated_arrival', 'estimated_payment', 'Categoria_viaje', 'tipo_relacion', 'min_intervalo_aplicado', 'latrecogida', 'lonrecogida', 'latdestino', 'londestino', 'h3_origin', 'h3_destino', 'avg_travel_time', 'Convenio', 'Tipo_servicio']
+            cols_mostrar_rutas = ['movil_id', 'reserva', 'HoraFecha', 'estimated_arrival', 'estimated_payment', 'Categoria_viaje', 'tipo_relacion', 'min_intervalo_aplicado', 'latrecogida', 'lonrecogida', 'latdestino', 'londestino', 'h3_origin', 'h3_destino', 'avg_travel_time', 'Convenio']
             if not df_rutas.empty:
                  cols_mostrar_rutas = [col for col in cols_mostrar_rutas if col in df_rutas.columns]
                  st.dataframe(df_rutas[cols_mostrar_rutas])
