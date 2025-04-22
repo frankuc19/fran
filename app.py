@@ -323,7 +323,6 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
                     df_pred['h3_destino'] = simulate_h3_vectorized(df_pred['latdestino'], df_pred['londestino'])
                     st.write(f"✔️ H3 simulado calculado para predicciones.")
 
-                    # Reemplazamos el merge con cálculo individual
                     df = df_pred.copy()
                     df['avg_travel_time'] = df.apply(
                         lambda row: get_average_time(row['h3_origin'], row['h3_destino']),
@@ -336,6 +335,23 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
                     df['estimated_arrival'] = pd.NaT
                     df.loc[valid_time_mask, 'estimated_arrival'] = df.loc[valid_time_mask, 'HoraFecha'] + pd.to_timedelta(df.loc[valid_time_mask, 'avg_travel_time'], unit='m')
                     st.write(f"✔️ Hora estimada de llegada calculada.")
+                    
+                    def filtrar_solapes(df):
+                        df_filtrado = []
+                        for movil_id, grupo in df.groupby('movil_id'):
+                            grupo = grupo.sort_values('HoraFecha')
+                            ultima_llegada = pd.Timestamp.min
+                            for _, fila in grupo.iterrows():
+                                if fila['HoraFecha'] >= ultima_llegada:
+                                    df_filtrado.append(fila)
+                                    ultima_llegada = fila['estimated_arrival']
+                                else:
+                                    # Si quieres ver cuáles fueron descartadas:
+                                    print(f"❌ Reserva descartada por solaparse: {fila['reserva']} (inicio: {fila['HoraFecha']}, llegada anterior: {ultima_llegada})")
+                        return pd.DataFrame(df_filtrado)
+                    
+                    df_sin_solapes = filtrar_solapes(df_sorted)
+                    df_sorted = df_sin_solapes.reset_index(drop=True)
 
                     # Procesar valores nulos y ordenar
                     df['estimated_payment'].fillna(0, inplace=True)
