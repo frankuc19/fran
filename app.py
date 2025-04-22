@@ -4,8 +4,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import timedelta
-import traceback
 from datetime import datetime
+import traceback
 from PIL import Image
 import os
 
@@ -392,15 +392,18 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
                                 # 👈 NUEVO: Verificamos si es la segunda reserva en la ruta
                                 if len(movil_actual) == 1:
                                     primera_reserva = movil_actual[0]
-                                    tiempo_est_arrival = datetime.strptime(primera_reserva["estimated_arrival"], "%Y-%m-%d %H:%M:%S")
-                                    hora_fecha_segunda = datetime.strptime(reserva["HoraFecha"], "%Y-%m-%d %H:%M:%S")
+                                    tiempo_est_arrival = pd.to_datetime(primera_reserva["estimated_arrival"])  # ✅ Corregido
+                                    hora_fecha_segunda = pd.to_datetime(reserva["HoraFecha"])  # También aseguramos formato correcto
 
-                                    intervalo_segunda_reserva = (hora_fecha_segunda - tiempo_est_arrival).total_seconds() / 60  # minutos
-                                    min_intervalo_segunda_reserva = min_intervalo_param  # 👈 Usa el valor que defines como parámetro
+                                    intervalo_segunda_reserva = (hora_fecha_segunda - tiempo_est_arrival).total_seconds() / 60
+                                    min_intervalo_segunda_reserva = min_intervalo_param
 
                                     if intervalo_segunda_reserva < min_intervalo_segunda_reserva:
-                                        motivo_final_no_asignado = f"Intervalo insuficiente desde estimated_arrival hasta HoraFecha ({intervalo_segunda_reserva:.1f} < {min_intervalo_segunda_reserva} min)"
-                                        continue  # 👈 No asignar esta reserva a este móvil
+                                        motivo_final_no_asignado = (
+                                            f"Intervalo insuficiente desde estimated_arrival hasta HoraFecha "
+                                            f"({intervalo_segunda_reserva:.1f} < {min_intervalo_segunda_reserva} min)"
+                                        )
+                                        continue  # Saltar a siguiente móvil
 
                                 # 👈 Si pasa la validación, se agrega normalmente
                                 movil_actual.append(reserva)
