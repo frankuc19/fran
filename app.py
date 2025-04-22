@@ -358,10 +358,11 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
                     st.stop()
             st.success("Fase 3 completada.")
 
-            # --- Fase 4: Algoritmo de Asignación ---
+        # --- Fase 4: Algoritmo de Asignación ---
         with st.expander("🚚 FASE 4: Asignación de Reservas", expanded=False):
             with st.spinner('Asignando reservas a móviles...'):
                 try:
+                    INTERVALO_MIN_DEFAULT_FACTOR = 1.5  # 👈 Factor configurable de intervalo mínimo
                     moviles = []
                     rutas_asignadas_list = []
                     reservas_no_asignadas_list = []
@@ -385,18 +386,24 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
                         motivo_final_no_asignado = "No se encontró móvil compatible"
 
                         for idx, movil_actual in enumerate(moviles):
-                            puede_agregar, tipo_relacion, intervalo, motivo = puede_agregarse_a_movil(movil_actual, reserva)
+                            puede_agregar, tipo_relacion, intervalo, motivo = puede_agregarse_a_movil(
+                                movil_actual, reserva, intervalo_default_factor=INTERVALO_MIN_DEFAULT_FACTOR
+                            )
                             motivo_final_no_asignado = motivo
 
                             if puede_agregar:
-                                # 👈 NUEVO: Verificamos si es la segunda reserva en la ruta
+                                # 👈 Verificación si es segunda reserva en ruta
                                 if len(movil_actual) == 1:
                                     primera_reserva = movil_actual[0]
-                                    tiempo_est_arrival = pd.to_datetime(primera_reserva["estimated_arrival"])  # ✅ Corregido
-                                    hora_fecha_segunda = pd.to_datetime(reserva["HoraFecha"])  # También aseguramos formato correcto
-
+                                    tiempo_est_arrival = pd.to_datetime(primera_reserva["estimated_arrival"])
+                                    hora_fecha_segunda = pd.to_datetime(reserva["HoraFecha"])
                                     intervalo_segunda_reserva = (hora_fecha_segunda - tiempo_est_arrival).total_seconds() / 60
-                                    min_intervalo_segunda_reserva = min_intervalo_param
+
+                                    # Calcular tiempo promedio entre zonas con factor ajustado
+                                    avg_time = reserva.get("avg_time_between_geohashes", 0)
+                                    min_intervalo_segunda_reserva = max(
+                                        min_intervalo_param, int(avg_time * INTERVALO_MIN_DEFAULT_FACTOR)
+                                    )
 
                                     if intervalo_segunda_reserva < min_intervalo_segunda_reserva:
                                         motivo_final_no_asignado = (
@@ -405,7 +412,7 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
                                         )
                                         continue  # Saltar a siguiente móvil
 
-                                # 👈 Si pasa la validación, se agrega normalmente
+                                # 👈 Si pasa la validación, se agrega
                                 movil_actual.append(reserva)
                                 rutas_asignadas_list.append({
                                     "movil_id": idx + 1, **reserva,
@@ -439,7 +446,6 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
                     st.error(f"Traceback: {traceback.format_exc()}")
                     st.stop()
             st.success("Fase 4 completada.")
-
 
         # --- Fase 5: Resultados (Fuera de los expanders) ---
         st.subheader("🏁 Fase 5: Resultados Finales")
