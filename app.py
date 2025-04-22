@@ -315,7 +315,6 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
             st.success("Fase 2 completada.")
 
         # --- Fase 3: Procesamiento de Predicciones ---
-        # --- Fase 3: Procesamiento de Predicciones ---
         with st.expander("📈 FASE 3: Procesamiento Predicciones", expanded=False):
             with st.spinner('Calculando rutas de predicciones y buscando tiempos promedio...'):
                 try:
