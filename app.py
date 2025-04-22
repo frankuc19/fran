@@ -422,7 +422,7 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
 
             # Mostrar DataFrames y botones de descarga
             st.subheader(" Reservas Asignadas por Móvil")
-            cols_mostrar_rutas = ['movil_id', 'reserva', 'HoraFecha', 'estimated_arrival', 'estimated_payment', 'Categoria_viaje', 'tipo_relacion', 'min_intervalo_aplicado', 'latrecogida', 'lonrecogida', 'latdestino', 'londestino', 'h3_origin', 'h3_destino', 'avg_travel_time', 'Convenio']
+            cols_mostrar_rutas = ['movil_id', 'reserva', 'HoraFecha', 'estimated_arrival', 'estimated_payment', 'Categoria_viaje', 'tipo_relacion', 'min_intervalo_aplicado', 'latrecogida', 'lonrecogida', 'latdestino', 'londestino', 'h3_origin', 'h3_destino', 'avg_travel_time', 'Convenio', 'Tipo_servicio']
             if not df_rutas.empty:
                  cols_mostrar_rutas = [col for col in cols_mostrar_rutas if col in df_rutas.columns]
                  st.dataframe(df_rutas[cols_mostrar_rutas])
