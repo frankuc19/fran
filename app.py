@@ -315,32 +315,35 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
             st.success("Fase 2 completada.")
 
         # --- Fase 3: Procesamiento de Predicciones ---
+        # --- Fase 3: Procesamiento de Predicciones ---
         with st.expander("📈 FASE 3: Procesamiento Predicciones", expanded=False):
             with st.spinner('Calculando rutas de predicciones y buscando tiempos promedio...'):
                 try:
+                    # Cálculo vectorizado de celdas H3
                     df_pred['h3_origin'] = simulate_h3_vectorized(df_pred['latrecogida'], df_pred['lonrecogida'])
                     df_pred['h3_destino'] = simulate_h3_vectorized(df_pred['latdestino'], df_pred['londestino'])
                     st.write(f"✔️ H3 simulado calculado para predicciones.")
 
-                    if summary_df is not None and not summary_df.empty:
-                        df = pd.merge(df_pred, summary_df[['h3_origin', 'h3_destino', 'avg_travel_time']], on=['h3_origin', 'h3_destino'], how='left')
-                        st.write(f"✔️ Tiempos promedio unidos a las predicciones.")
-                        num_matched = df['avg_travel_time'].notna().sum()
-                        st.write(f"   ({num_matched} de {len(df)} predicciones encontraron un tiempo promedio histórico)")
-                    else:
-                        st.warning("⚠️ No hay datos históricos promedio, no se asignarán tiempos promedio.")
-                        df = df_pred.copy()
-                        df['avg_travel_time'] = np.nan
+                    # Reemplazamos el merge con cálculo individual
+                    df = df_pred.copy()
+                    df['avg_travel_time'] = df.apply(
+                        lambda row: get_average_time(row['h3_origin'], row['h3_destino']),
+                        axis=1
+                    )
+                    st.write(f"✔️ Tiempo promedio calculado individualmente para cada predicción.")
 
+                    # Calcular hora estimada de llegada
                     valid_time_mask = df['avg_travel_time'].notna() & df['HoraFecha'].notna()
                     df['estimated_arrival'] = pd.NaT
                     df.loc[valid_time_mask, 'estimated_arrival'] = df.loc[valid_time_mask, 'HoraFecha'] + pd.to_timedelta(df.loc[valid_time_mask, 'avg_travel_time'], unit='m')
                     st.write(f"✔️ Hora estimada de llegada calculada.")
 
+                    # Procesar valores nulos y ordenar
                     df['estimated_payment'].fillna(0, inplace=True)
                     df_sorted = df.sort_values(by=["HoraFecha", "estimated_payment"], ascending=[True, False], na_position='last').reset_index(drop=True)
-                    df_sorted.dropna(subset=['HoraFecha'], inplace=True) # Eliminar filas sin fecha válida
+                    df_sorted.dropna(subset=['HoraFecha'], inplace=True)
                     st.write(f"✔️ Predicciones ordenadas y filtradas ({len(df_sorted)} válidas).")
+
                 except Exception as e:
                     st.error(f"Error Crítico durante el procesamiento de predicciones: {e}")
                     st.error(f"Traceback: {traceback.format_exc()}")
