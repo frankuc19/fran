@@ -421,8 +421,8 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
             col2b.metric("Monto Total Asignado", f"${monto_total_asignado:,.0f}")
 
             # Mostrar DataFrames y botones de descarga
-            st.subheader(" Ruedas Asignadas por Móvil")
-            cols_mostrar_rutas = ['movil_id', 'reserva', 'HoraFecha', 'estimated_arrival', 'estimated_payment', 'Categoria_viaje', 'tipo_relacion', 'min_intervalo_aplicado', 'latrecogida', 'lonrecogida', 'latdestino', 'londestino', 'h3_origin', 'h3_destino', 'avg_travel_time']
+            st.subheader(" Reservas Asignadas por Móvil")
+            cols_mostrar_rutas = ['movil_id', 'reserva', 'HoraFecha', 'estimated_arrival', 'estimated_payment', 'Categoria_viaje', 'tipo_relacion', 'min_intervalo_aplicado', 'latrecogida', 'lonrecogida', 'latdestino', 'londestino', 'h3_origin', 'h3_destino', 'avg_travel_time', 'Convenio']
             if not df_rutas.empty:
                  cols_mostrar_rutas = [col for col in cols_mostrar_rutas if col in df_rutas.columns]
                  st.dataframe(df_rutas[cols_mostrar_rutas])
