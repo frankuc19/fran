@@ -629,8 +629,7 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
             # Columnas a mostrar para no asignadas
             cols_deseadas_no_asignadas = [
                 'reserva', 'HoraFecha', 'estimated_payment', 'Categoria_viaje',
-                'latrecogida', 'lonrecogida', 'latdestino', 'londestino',
-                'h3_origin', 'h3_destino', 'avg_travel_time', 'motivo_no_asignado'
+                 'avg_travel_time', 'motivo_no_asignado', 'Convenio', 'Tipo_servicio'
                 # Añadir 'Convenio', 'Tipo_servicio' si existen y son relevantes
             ]
             if not df_no_asignadas.empty:
