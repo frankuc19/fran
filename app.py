@@ -297,7 +297,7 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
         st.write("---") # Separador visual
 
         # --- Fase 1: Lectura y Validación Inicial ---
-        with st.expander("👁️ FASE 1: Lectura y Validación de Archivos", expanded=True): # Expandido por defecto
+        with st.expander("👁️ FASE 1: Lectura y Validación de Archivos", expanded=False): # Expandido por defecto
             with st.spinner('Leyendo y validando archivos...'):
                 # Leer archivo histórico
                 try:
@@ -485,7 +485,7 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
 
 # --- Fase 4: Algoritmo de Asignación ---
 # (Esta fase no requiere modificaciones, ya que ahora recibe 'estimated_arrival' siempre calculado)
-        with st.expander("🚚 FASE 4: Asignación de Reservas", expanded=True):
+        with st.expander("🚚 FASE 4: Asignación de Reservas", expanded=False):
             with st.spinner('Asignando reservas a móviles...'):
                 try:
                     # Convertir el DataFrame ordenado a lista de diccionarios para iterar
