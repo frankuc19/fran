@@ -560,7 +560,7 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
                     st.error(f"Error Crítico durante la asignación de reservas: {e}")
                     st.error(f"Traceback: {traceback.format_exc()}")
                     st.stop()
-            st.success("Fase 4 completada.")
+                st.success("Fase 4 completada.")
 
 
         # --- Fase 5: Resultados (Fuera de los expanders) ---
