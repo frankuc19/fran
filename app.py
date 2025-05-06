@@ -599,7 +599,7 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
             cols_deseadas_rutas = [
                 'movil_id', 'reserva', 'HoraFecha', 'estimated_arrival', 'estimated_payment',
                 'Categoria_viaje', 'tipo_relacion', 'min_intervalo_aplicado',
-                 'avg_travel_time', 'Convenio', 'Tipo_servicio'
+                 'avg_travel_time', 'Convenio', 'Tipo_servicio', 'ZonaOrigen',	'Zonadestino'
                 # Añadir 'Convenio', 'Tipo_servicio' si existen y son relevantes
                 # 'Convenio', 'Tipo_servicio'
             ]
@@ -629,7 +629,7 @@ if uploaded_file_hist is not None and uploaded_file_pred is not None:
             # Columnas a mostrar para no asignadas
             cols_deseadas_no_asignadas = [
                 'reserva', 'HoraFecha', 'estimated_payment', 'Categoria_viaje',
-                 'avg_travel_time', 'motivo_no_asignado', 'Convenio', 'Tipo_servicio'
+                 'avg_travel_time', 'motivo_no_asignado', 'Convenio', 'Tipo_servicio', 'ZonaOrigen', 'Zonadestino'
                 # Añadir 'Convenio', 'Tipo_servicio' si existen y son relevantes
             ]
             if not df_no_asignadas.empty:
