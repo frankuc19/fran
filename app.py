@@ -58,7 +58,7 @@ RADIO_TIERRA_KM = 6371
 PRECISION_SIMULATE_H3 = 3 # Precisión para simular H3 (más decimales = más granularidad)
 
 # Intervalos base en minutos entre servicios
-INTERVALO_CAMBIO_INTERREGIONAL = 270 # Intervalo al cambiar de/a Interregional o Divisiones
+INTERVALO_CAMBIO_INTERREGIONAL = 300 # Intervalo al cambiar de/a Interregional o Divisiones
 INTERVALO_URBANO_NOCTURNO = 70      # Intervalo para Urbano entre 00:00 y 05:59
 INTERVALO_URBANO_DIURNO = 80       # Intervalo para Urbano fuera de horario nocturno
 INTERVALO_GENERAL = 80             # Intervalo por defecto para otras categorías
